@@ -167,10 +167,14 @@ def _load_selected_preset() -> None:
     st.session_state.pop("simulation_result", None)
     preset = _PRESETS[st.session_state["preset_name"]]
     if preset is None:
+        st.session_state["_has_custom_gates"] = True
         return
 
+    if st.session_state.get("_has_custom_gates", False):
+        st.session_state["preset_notice"] = "Selecting a preset replaces your custom gates."
     qubit_count, gates = preset
     _set_gate_sequence_in_state(qubit_count, gates)
+    st.session_state["_has_custom_gates"] = False
 
 
 def _load_uploaded_circuit() -> None:
@@ -193,11 +197,13 @@ def _load_uploaded_circuit() -> None:
     _set_gate_sequence_in_state(qubit_count, gates)
     st.session_state["preset_name"] = "Custom circuit"
     st.session_state.pop("simulation_result", None)
+    st.session_state["_has_custom_gates"] = True
     st.session_state["import_message"] = ("success", "Circuit imported and validated.")
 
 
 def _mark_preset_custom() -> None:
     st.session_state.pop("simulation_result", None)
+    st.session_state["_has_custom_gates"] = True
     if "preset_name" in st.session_state:
         st.session_state["preset_name"] = "Custom circuit"
 
@@ -211,6 +217,7 @@ def _handle_qubit_count_change() -> None:
     qubit_count = int(st.session_state["qubit_count"])
     st.session_state["max_display_outcomes"] = min(50, 2**qubit_count)
     valid_qubits = range(qubit_count)
+    moved_gates = False
     for index in range(MAX_GATES):
         gate = st.session_state.get(f"gate_{index}_type")
         arity = {"cx": 2, "cz": 2, "cp": 2, "swap": 2, "ccx": 3}.get(gate, 1)
@@ -218,6 +225,7 @@ def _handle_qubit_count_change() -> None:
             key = f"gate_{index}_qubit"
             if key in st.session_state and st.session_state[key] not in valid_qubits:
                 st.session_state[key] = 0
+                moved_gates = True
             continue
 
         used_qubits: set[int] = set()
@@ -231,16 +239,21 @@ def _handle_qubit_count_change() -> None:
                 if available_qubits:
                     qubit = min(available_qubits)
                     st.session_state[key] = qubit
+                    moved_gates = True
                 elif qubit not in valid_qubits:
                     qubit = 0
                     st.session_state[key] = qubit
+                    moved_gates = True
             used_qubits.add(qubit)
+    if moved_gates:
+        st.session_state["qubit_count_notice"] = "Gates were moved to fit the new qubit count."
 
 
 def _clear_all_gates() -> None:
     _clear_gate_widget_state()
     st.session_state["gate_count"] = 0
     st.session_state["preset_name"] = "Custom circuit"
+    st.session_state["_has_custom_gates"] = False
     st.session_state.pop("simulation_result", None)
 
 
@@ -414,6 +427,12 @@ def _build_comparison_data(
     return outcomes, comparison_data
 
 
+def _comparison_legend_methods(comparison_data: pd.DataFrame) -> list[str]:
+    method_order = ["Exact", "Noisy Exact", "Shots", "Shots (noisy)"]
+    present_methods = set(comparison_data["Method"])
+    return [method for method in method_order if method in present_methods]
+
+
 def _rank_outcomes(
     exact_probabilities: dict[str, float],
     shot_counts: dict[str, int],
@@ -520,6 +539,13 @@ def _render_gate_editor(qubit_count: int, gate_count: int) -> list[dict[str, obj
 
 
 def _render_probability_chart(outcomes: list[str], comparison_data: pd.DataFrame) -> None:
+    legend_methods = _comparison_legend_methods(comparison_data)
+    method_colors = {
+        "Exact": "#8ecae6",
+        "Noisy Exact": "#219ebc",
+        "Shots": "#ffb703",
+        "Shots (noisy)": "#fb8500",
+    }
     chart = (
         alt.Chart(comparison_data)
         .mark_bar()
@@ -540,8 +566,8 @@ def _render_probability_chart(outcomes: list[str], comparison_data: pd.DataFrame
                 "Method:N",
                 title="Method",
                 scale=alt.Scale(
-                    domain=["Exact", "Noisy Exact", "Shots", "Shots (noisy)"],
-                    range=["#8ecae6", "#219ebc", "#023047", "#023047"],
+                    domain=legend_methods,
+                    range=[method_colors[method] for method in legend_methods],
                 ),
             ),
             tooltip=[
@@ -713,6 +739,9 @@ def main() -> None:
                 "presets state their oracle/secret in the name."
             ),
         )
+        preset_notice = st.session_state.pop("preset_notice", None)
+        if preset_notice is not None:
+            st.info(preset_notice)
         uploaded_file = st.file_uploader(
             "Import circuit JSON",
             type=["json"],
@@ -739,6 +768,9 @@ def main() -> None:
             on_change=_handle_qubit_count_change,
             help=f"Exact statevector simulation is limited to {MAX_QUBITS} qubits.",
         )
+        qubit_count_notice = st.session_state.pop("qubit_count_notice", None)
+        if qubit_count_notice is not None:
+            st.info(qubit_count_notice)
         shots = st.number_input(
             "Shot count",
             min_value=1,
@@ -897,11 +929,29 @@ def main() -> None:
                 mime="text/plain",
                 key="download_qasm_button",
             )
+            col_qasm.caption(
+                "OpenQASM stores the current parameter value; JSON keeps parameter names."
+            )
         except ValueError as error:
             parameterized_circuit = None
             parameter_values = {}
             preview_circuit = None
-            st.warning(f"Preview unavailable: {error}")
+            unfit_gate = next(
+                (
+                    str(gate_spec["gate"])
+                    for gate_spec in gate_sequence
+                    if {"cx": 2, "cz": 2, "cp": 2, "swap": 2, "ccx": 3}.get(gate_spec["gate"], 1)
+                    > qubit_count
+                ),
+                None,
+            )
+            if unfit_gate is not None:
+                st.warning(
+                    f"Preview unavailable: The {unfit_gate} gate no longer fits "
+                    "the current qubit count."
+                )
+            else:
+                st.warning(f"Preview unavailable: {error}")
 
         st.caption(
             "Gate order is preserved. Named rotation parameters can be swept "

@@ -52,6 +52,10 @@ $env:RUN_STRESS="1"; .\.venv\Scripts\python.exe -m unittest discover -s tests -p
 
 The engine uses Qiskit's little-endian bitstring convention (`q[n-1] ... q1 q0`, q0 at the right), limits exact simulation to 10 qubits, and caps circuits at 50 gates and experiments at 100,000 shots. Exact noisy probability simulation is limited to 8 qubits; noisy shot sampling remains available above that limit. The optional noise model affects supported gate operations and/or measurement; it does not model idle-time noise.
 
+Supported gates are `h`, `x`, `y`, `z`, `s`, `t`, `swap`, `cx`, `cz`, `ccx`, `rx`, `ry`, `rz`, `p`, and `cp`.
+
+Importing a circuit restores its gates and parameter names, but not parameter values, shots, seed, noise settings, or maximum displayed outcomes. OpenQASM downloads store the current parameter value, while JSON exports keep parameter names.
+
 ## Code quality and CI
 
 Install development tools with `pip install -r requirements-dev.txt`. Run Ruff locally with `ruff check .` and `ruff format .`. GitHub Actions runs Ruff and the unittest suite on pushes and pull requests using Python 3.12.

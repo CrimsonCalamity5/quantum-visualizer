@@ -17,6 +17,7 @@ import app as app_module  # noqa: E402
 from app import (
     _build_comparison_data,
     _build_state_inspector_data,
+    _comparison_legend_methods,
     _filter_result_frames,
     _rank_outcomes,
     _select_sweep_outcomes,
@@ -94,6 +95,24 @@ class ComparisonDataTests(unittest.TestCase):
         self.assertIn("00", filtered_comparison["Outcome"].tolist())
         self.assertTrue(set(visible).issubset(outcomes))
 
+    def test_noisy_exact_legend_entry_tracks_available_series(self) -> None:
+        exact = {"0": 1.0}
+        counts = {"0": 10}
+        for qubit_count in (8, 9):
+            with self.subTest(qubit_count=qubit_count):
+                noisy = {"0": 1.0} if qubit_count <= 8 else None
+                _, comparison = _build_comparison_data(
+                    exact,
+                    counts,
+                    10,
+                    noisy_probabilities=noisy,
+                )
+                legend_methods = _comparison_legend_methods(comparison)
+                self.assertEqual(
+                    "Noisy Exact" in legend_methods,
+                    qubit_count <= 8,
+                )
+
 
 class StateInspectorTests(unittest.TestCase):
     def test_inspector_calculates_phase_and_marks_zero_amplitude_undefined(self) -> None:
@@ -120,6 +139,54 @@ class StateInspectorTests(unittest.TestCase):
 
 
 class CircuitImportTests(unittest.TestCase):
+    def _import_error(self, content: str) -> str:
+        state = {"circuit_file": Mock(getvalue=lambda: content.encode("utf-8"))}
+        with patch.object(app_module.st, "session_state", state):
+            app_module._load_uploaded_circuit()
+        self.assertEqual(state["import_message"][0], "error")
+        return state["import_message"][1]
+
+    def test_import_errors_use_friendly_messages(self) -> None:
+        too_many_qubits = self._import_error('{"qubit_count": 11, "gates": []}')
+        self.assertIn("at most 10 qubits", too_many_qubits)
+        self.assertNotIn("MAX_QUBITS", too_many_qubits)
+
+        for content in ("[]", "null"):
+            with self.subTest(content=content):
+                self.assertIn("must be a JSON object", self._import_error(content))
+
+        invalid_json = self._import_error("{")
+        self.assertNotIn("Expecting value", invalid_json)
+        self.assertIn("This file is not valid JSON.", invalid_json)
+
+    def test_import_error_lists_exact_supported_gate_set(self) -> None:
+        message = self._import_error(
+            '{"qubit_count": 1, "gates": [{"gate": "unsupported", "qubits": [0]}]}'
+        )
+        supported_list = message.split("Supported gates are: ", maxsplit=1)[1].rstrip(".")
+        supported_gates = supported_list.split(", ")
+        self.assertEqual(len(supported_gates), 15)
+        self.assertEqual(
+            set(supported_gates),
+            {
+                "h",
+                "x",
+                "y",
+                "z",
+                "s",
+                "t",
+                "swap",
+                "cx",
+                "cz",
+                "ccx",
+                "rx",
+                "ry",
+                "rz",
+                "p",
+                "cp",
+            },
+        )
+
     def test_failed_import_leaves_current_editor_untouched(self) -> None:
         old_editor_state = {
             "gate_count": 1,

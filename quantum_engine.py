@@ -74,9 +74,7 @@ def _validate_qubit_count(qubit_count: int) -> None:
     if qubit_count < 1:
         raise ValueError("qubit_count must be at least 1.")
     if qubit_count > MAX_QUBITS:
-        raise ValueError(
-            f"qubit_count cannot exceed MAX_QUBITS ({MAX_QUBITS}); received {qubit_count}."
-        )
+        raise ValueError(f"A circuit may have at most {MAX_QUBITS} qubits; received {qubit_count}.")
 
 
 def _convolve_pauli_probabilities(first: Sequence[float], second: Sequence[float]) -> list[float]:
@@ -798,8 +796,10 @@ def import_circuit_json(content: str) -> tuple[int, list[dict[str, object]]]:
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as error:
-        raise ValueError(f"Invalid circuit JSON: {error.msg}.") from error
-    if not isinstance(payload, dict) or set(payload) != {"qubit_count", "gates"}:
+        raise ValueError(f"This file is not valid JSON. (Line {error.lineno}.)") from error
+    if not isinstance(payload, dict):
+        raise ValueError("Circuit file must be a JSON object.")
+    if set(payload) != {"qubit_count", "gates"}:
         raise ValueError("Circuit JSON must contain exactly 'qubit_count' and 'gates'.")
     qubit_count = payload["qubit_count"]
     gates = payload["gates"]

@@ -68,6 +68,10 @@ class StreamlitAppTests(unittest.TestCase):
         self.app.selectbox(key="gate_1_type").select("z").run(timeout=60)
 
         self.app.selectbox(key="preset_name").select("QFT (3 qubits)").run(timeout=60)
+        self.assertIn(
+            "Selecting a preset replaces your custom gates.",
+            [element.value for element in self.app.info],
+        )
         self.app.selectbox(key="preset_name").select("Custom circuit").run(timeout=60)
 
         expected_gates = [gate["gate"] for gate in _PRESETS["QFT (3 qubits)"][1]]
@@ -93,6 +97,7 @@ class StreamlitAppTests(unittest.TestCase):
             [
                 "Explore common circuits, inspect ideal quantum states, and compare "
                 "ideal probabilities with sampled results.",
+                "OpenQASM stores the current parameter value; JSON keeps parameter names.",
                 "Gate order is preserved. Named rotation parameters can be swept "
                 "in the Variational Lab.",
             ],
@@ -238,6 +243,26 @@ class StreamlitAppTests(unittest.TestCase):
 
         self.assertEqual(self.app.selectbox(key="gate_1_operand_0").value, 0)
         self.assertEqual(self.app.selectbox(key="gate_1_operand_1").value, 0)
+        self.assertTrue(
+            any(
+                "gate no longer fits the current qubit count" in element.value
+                for element in self.app.warning
+            )
+        )
+        self.assertEqual(len(self.app.exception), 0)
+
+    def test_qubit_count_shrink_notifies_when_gates_are_moved(self) -> None:
+        self.app.slider(key="qubit_count").set_value(3).run(timeout=60)
+        self.app.selectbox(key="gate_1_type").select("cx").run(timeout=60)
+        self.app.selectbox(key="gate_1_operand_0").set_value(0).run(timeout=60)
+        self.app.selectbox(key="gate_1_operand_1").set_value(2).run(timeout=60)
+
+        self.app.slider(key="qubit_count").set_value(2).run(timeout=60)
+
+        self.assertIn(
+            "Gates were moved to fit the new qubit count.",
+            [element.value for element in self.app.info],
+        )
         self.assertEqual(len(self.app.exception), 0)
 
     def test_ccx_qubit_count_shrink_keeps_operands_valid(self) -> None:
