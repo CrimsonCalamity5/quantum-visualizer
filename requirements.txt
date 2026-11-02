@@ -1,0 +1,10 @@
+altair>=6.3,<7
+matplotlib>=3.8,<4
+numpy>=2,<3
+openqasm3>=1.0,<2
+pandas>=3.1,<4
+plotly>=6,<7
+pylatexenc>=2.10,<3
+qiskit>=2.6,<3
+qiskit-aer>=0.18,<0.19
+streamlit>=1.66,<2

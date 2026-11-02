@@ -1,0 +1,17 @@
+.venv/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.ruff_cache/
+test_output.txt
+
+# Local logs and run output
+crash_trace.txt
+streamlit_log.txt
+*_output.txt
+*.log
+
+# Any virtual environment
+.venv*/
