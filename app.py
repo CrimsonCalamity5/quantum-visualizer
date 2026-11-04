@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 import logging
 import math
 from io import BytesIO
@@ -25,6 +26,7 @@ from quantum_engine import (
     build_qft_sequence,
     calculate_shot_standard_errors,
     draw_circuit_mpl,
+    draw_circuit_text,
     export_circuit_json,
     export_circuit_qasm,
     get_noisy_probabilities,
@@ -308,6 +310,14 @@ def _cached_circuit_png(qasm_key: str, _circuit: Any) -> bytes:
         buffer.close()
 
 
+def _show_circuit(circuit: Any) -> None:
+    """Show a circuit diagram; adding ?plain=1 to the URL uses the text drawer."""
+    if st.query_params.get("plain") == "1":
+        st.code(draw_circuit_text(circuit), language=None)
+    else:
+        st.image(_cached_circuit_png(export_circuit_qasm(circuit), circuit))
+
+
 @st.cache_data(show_spinner=False, max_entries=8)
 def _cached_parameter_sweep(
     qubit_count: int,
@@ -490,9 +500,11 @@ def _render_gate_editor(qubit_count: int, gate_count: int) -> list[dict[str, obj
                         (
                             "Control qubit"
                             if gate in ("cx", "ccx", "cp") and operand_index == 0
-                            else "Target qubit"
-                            if gate in ("cx", "ccx", "cp") and operand_index == arity - 1
-                            else f"Qubit {operand_index + 1}"
+                            else (
+                                "Target qubit"
+                                if gate in ("cx", "ccx", "cp") and operand_index == arity - 1
+                                else f"Qubit {operand_index + 1}"
+                            )
                         ),
                         options=qubit_indices,
                         key=f"gate_{index}_operand_{operand_index}",
@@ -699,20 +711,64 @@ def _render_phase_chart(state_data: pd.DataFrame) -> None:
 def _calculate_selected_parameter_values(circuit: Any) -> dict[str, float]:
     values = {}
     for parameter in circuit.parameters:
-        key = f"parameter_value_{parameter.name}"
-        values[parameter.name] = st.slider(
-            f"{parameter.name} (radians)",
-            min_value=-2.0 * math.pi,
-            max_value=2.0 * math.pi,
-            value=float(st.session_state.get(key, 0.0)),
-            step=0.05,
-            key=key,
-            on_change=_invalidate_simulation,
-        )
+        base_key = f"parameter_value_{parameter.name}"
+        slider_key = f"{base_key}_slider"
+        input_key = f"{base_key}_input"
+
+        # Initialize default value in session state if it doesn't exist
+        if base_key not in st.session_state:
+            st.session_state[base_key] = 0.0
+
+        # Ensure individual widget states stay aligned with the core value
+        if slider_key not in st.session_state:
+            st.session_state[slider_key] = st.session_state[base_key]
+        if input_key not in st.session_state:
+            st.session_state[input_key] = st.session_state[base_key]
+
+        # Syncing functions that run the instant you move or type a value
+        def sync_from_slider(bk=base_key, sk=slider_key, ik=input_key):
+            st.session_state[bk] = st.session_state[sk]
+            st.session_state[ik] = st.session_state[sk]
+            _invalidate_simulation()
+
+        def sync_from_input(bk=base_key, sk=slider_key, ik=input_key):
+            st.session_state[bk] = st.session_state[ik]
+            st.session_state[sk] = st.session_state[ik]
+            _invalidate_simulation()
+
+        # Render side-by-side using columns (3:1 size ratio looks cleanest)
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            st.slider(
+                label=f"{parameter.name} (radians)",
+                min_value=-6.28,
+                max_value=6.28,
+                step=0.01,
+                format="%.2f",
+                key=slider_key,
+                on_change=sync_from_slider,
+            )
+
+        with col2:
+            st.number_input(
+                label="Type value",
+                min_value=-6.28,
+                max_value=6.28,
+                step=0.01,
+                format="%.2f",
+                label_visibility="collapsed",
+                key=input_key,
+                on_change=sync_from_input,
+            )
+
+        values[parameter.name] = st.session_state[base_key]
+
     return values
 
 
 def main() -> None:
+    faulthandler.enable()
     st.set_page_config(
         page_title="Quantum Circuit Visualizer",
         page_icon="⚛️",
@@ -725,6 +781,116 @@ def main() -> None:
         "Explore common circuits, inspect ideal quantum states, and compare "
         "ideal probabilities with sampled results."
     )
+    with st.expander("👋 New to Quantum? Read this 60-Second Beginner's Guide!", expanded=True):
+        st.markdown("### ⚛️ What is this app?")
+        st.write(
+            "In theory, quantum computers use physics to solve impossible problems. "
+            "In reality, nature is messy. "
+            "Everyday heat and interference create **Noise**, which causes mistakes. "
+            "This app lets you design quantum programs and see exactly how "
+            "real-world errors corrupt perfect math."
+        )
+
+        # Single tab group for the beginner's guide
+        tab_guide_ws, tab_guide_comp, tab_guide_inspect, tab_guide_lab = st.tabs(
+            [
+                "🎨 The Workspace & Gates",
+                "📊 Simulation & Noise",
+                "🔍 State Inspector",
+                "🧪 Variational Lab",
+            ]
+        )
+
+        with tab_guide_ws:
+            st.markdown("#### **The Workspace: Writing your Quantum Recipe**")
+            st.write(
+                "This is your drafting canvas. You give step-by-step instructions "
+                "(**Gates**) to your information units (**Qubits**)."
+            )
+
+            st.markdown("##### **⚡ Core Concepts**")
+            st.markdown("""
+            * **Presets Menu:** Auto-loads famous programs like the **Bell State** 
+            or the **Quantum Fourier Transform (QFT)**.
+            * **Superposition:** Puts a qubit into a fluid state where it acts as both 0 
+            and 1 at the same time (like a spinning coin before it lands).
+            * **Entanglement:** Digitally links qubits together so that whatever happens 
+            to one instantly changes the other.
+            """)
+
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.markdown("""
+                * **`h` (Hadamard):** Creates **Superposition** (spins your coin).
+                * **`x` (NOT / Bit-Flip):** Flips a qubit completely (0 becomes 1, 1 becomes 0).
+                * **`y` & `z`:** Advanced flips that alter the mathematical wave direction 
+                (**Phase**).
+                * **`s` & `t`:** Small, fixed phase nudges (quarter and eighth turns).
+                * **`rx`, `ry`, `rz`, `p`:** Custom rotation angles. Use the slider or type 
+                numbers to smoothly twist a qubit in any direction.
+                """)
+
+            with col_g2:
+                st.markdown("""
+                * **`cx` (CNOT):** Flips a target qubit *only if* a control qubit is 1. 
+                This is your primary **Entanglement** tool!
+                * **`cz` & `cp`:** Controlled phase gates that alter wave directions only 
+                when connected qubits are active.
+                * **`swap`:** Physically trades the exact states of two qubits.
+                * **`ccx` (Toffoli):** Flips a target qubit *only if two* control qubits 
+                are active (works like a quantum 'AND' gate).
+                """)
+
+        with tab_guide_comp:
+            st.markdown("#### **Simulation Comparison: Testing Three Worlds at Once**")
+            st.write(
+                "When you run your program, the app tracks three different mathematical "
+                "models simultaneously to isolate errors:"
+            )
+            st.markdown("""
+            * **Exact View:** Pure probability math under perfect, zero-error laboratory conditions.
+            * **Noisy Exact:** Simulates actual hardware faults like **Bit/Phase-Flips** 
+              (accidental data flipping), **Depolarizing Noise** (raw data scrambling), 
+              **Amplitude Damping** (energy escaping), and **Readout Errors** (faulty tools).
+            * **Finite Shots:** Simulates practical hardware execution by running your code 
+              repeatedly (**Shots**) to sample statistical roughness over fixed runs 
+              (like 1,024 runs).
+            """)
+
+        with tab_guide_inspect:
+            st.markdown("#### **State Inspector: Looking Under the Hood**")
+            st.write(
+                "Quantum states are invisible. This tab pulls back the curtain to run "
+                "deep diagnostic medical checks on your code's health:"
+            )
+            st.markdown("""
+            * **Statevector Matrix:** Shows the raw mathematical coordinates and arrows 
+              directing your active data.
+            * **Per-Qubit Reduced States:** Isolates individual qubits from the group to check 
+              if they are behaving correctly on their own lines.
+            * **State Purity:** A health score from 0.0 to 1.0. A perfect ideal state scores 
+              a `1.0`. As environmental noise infects your system, this score drops.
+            * **von Neumann Entropy:** Measures the structural chaos of your quantum 
+              information. Perfect states have `0` entropy. High entropy means your 
+              useful program has decayed into useless heat.
+            """)
+
+        with tab_guide_lab:
+            st.markdown("#### **Variational Lab: Advanced Hybrid Engineering**")
+            st.write(
+                "Modern quantum computing uses a regular 'classical' computer to tightly "
+                "monitor, correct, and tune a noisy quantum chip:"
+            )
+            st.markdown(r"""
+            * **Parameter Sweep:** Instead of testing just one angle, this feature automatically 
+              sweeps a gate's rotation across a full landscape ($0$ to $2\pi$). It stitches 
+              the results into a continuous wave line graph.
+            * **Toy VQE Lab (Variational Quantum Eigensolver):** Runs a smart
+              machine-learning-style 
+              optimization loop. It demonstrates how software actively tunes gate paths to 
+            find 
+              the lowest possible energy state of a molecule.
+            """)
 
     with st.sidebar:
         st.header("Circuit and simulation")
@@ -909,11 +1075,12 @@ def main() -> None:
         gate_sequence = _render_gate_editor(qubit_count, int(gate_count))
         try:
             validate_circuit_parameters(qubit_count, gate_sequence)
+
             parameterized_circuit = build_circuit(qubit_count, gate_sequence)
             parameter_values = _calculate_selected_parameter_values(parameterized_circuit)
             preview_circuit = bind_circuit_parameters(parameterized_circuit, parameter_values)
             st.subheader("Live circuit preview")
-            st.image(_cached_circuit_png(export_circuit_qasm(preview_circuit), preview_circuit))
+            _show_circuit(preview_circuit)
             col_json, col_qasm = st.columns(2)
             col_json.download_button(
                 "Download circuit JSON",
@@ -1083,12 +1250,7 @@ def main() -> None:
             else:
                 step = 0
             prefix = simulation_result["prefix_steps"][step]
-            st.image(
-                _cached_circuit_png(
-                    export_circuit_qasm(prefix["circuit"]),
-                    prefix["circuit"],
-                )
-            )
+            _show_circuit(prefix["circuit"])
             st.caption(
                 f"Showing the ideal state after {step} of "
                 f"{len(simulation_result['gate_sequence'])} gates."
@@ -1234,7 +1396,8 @@ def main() -> None:
                 min_value=-2.0 * math.pi,
                 max_value=2.0 * math.pi,
                 value=(0.0, 2.0 * math.pi),
-                step=0.1,
+                step=0.01,
+                format="%.2f",
                 key="sweep_range",
             )
             sweep_points = st.slider(
@@ -1242,7 +1405,7 @@ def main() -> None:
                 min_value=5,
                 max_value=101,
                 value=41,
-                step=2,
+                step=1,
                 key="sweep_points",
             )
             try:

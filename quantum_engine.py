@@ -18,7 +18,7 @@ import re
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from numbers import Real
-from typing import Any, TypeAlias
+from typing import Any
 
 import numpy as np
 from qiskit import QuantumCircuit, qasm3
@@ -38,7 +38,7 @@ MAX_SHOTS = 100_000
 MAX_GATES = 50
 MAX_NOISY_EXACT_QUBITS = 8
 
-GateSpecification: TypeAlias = Mapping[str, object]
+type GateSpecification = Mapping[str, object]
 _ANGLE_GATES = frozenset({"rx", "ry", "rz", "p", "cp"})
 _SUPPORTED_GATES = frozenset(
     {"h", "x", "y", "z", "s", "t", "swap", "cx", "cz", "ccx", *_ANGLE_GATES}

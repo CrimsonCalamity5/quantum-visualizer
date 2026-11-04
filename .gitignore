@@ -15,3 +15,5 @@ streamlit_log.txt
 
 # Any virtual environment
 .venv*/
+
+stress_output.txt
